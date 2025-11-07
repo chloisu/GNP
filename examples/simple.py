@@ -35,6 +35,8 @@ from GNP.precond import *
 from GNP.nn import ResGCN
 from GNP.utils import scale_A_by_spectral_radius, load_suitesparse
 
+from GNP.nn import PyGGCN
+
 
 #-----------------------------------------------------------------------------
 def main():
@@ -129,12 +131,12 @@ def main():
 
     # GMRES with GNP: Train preconditioner
     print('\nTraining GNP ...')
-    net = ResGCN(A, num_layers, embed, hidden, drop_rate,
+    net = PyGGCN(A, num_layers, embed, hidden, drop_rate,
                  scale_input=not disable_scale_input, dtype=dtype).to(device)
     optimizer = torch.optim.Adam(net.parameters(), lr=lr,
                                  weight_decay=weight_decay)
     scheduler = None
-    M = GNP(A, training_data, m, net, device)
+    M = PyGGNP(A, training_data, m, net, device)
     tic = time.time()
     hist_loss, best_loss, best_epoch, model_file = M.train(
         batch_size, grad_accu_steps, epochs, optimizer, scheduler,
@@ -164,7 +166,7 @@ def main():
     if model_file:
         print(f'\nLoading model from {model_file} ...')
         net.load_state_dict(torch.load(model_file, map_location=device))
-        M = GNP(A, training_data, m, net, device)
+        M = PyGGNP(A, training_data, m, net, device)
         print('Done.')
     else:
         print('\nNo checkpoint is saved. Use model from the last epoch.')

@@ -37,7 +37,7 @@ import GNP.problems as syn_problems
 from GNP.problems import *
 from GNP.solver import GMRES
 from GNP.precond import *
-from GNP.nn import ResGCN
+from GNP.nn import ResGCN, PyGGCN
 from GNP.utils import scale_A_by_spectral_radius, load_suitesparse
 
 
@@ -95,7 +95,7 @@ def main():
     # Preconditioner choices
     parser.add_argument(
         '--preconditioners', choices=['gmres', 'gnp', 'ilu', 'amg', 'amg_air',
-                                      'jacobi', 'bjacobi'],
+                                      'jacobi', 'bjacobi','pyggnp'],
         nargs='+',
         help='run the code with preconditioner(s)')
 
@@ -497,6 +497,91 @@ def main():
                   f'Final relative residual = {hist_rel_res_gnp[-1]:.4e}')
         warnings.resetwarnings()
         
+
+    # GMRES with PyGGNP
+    if args.preconditioners is not None and 'pyggnp' in args.preconditioners:
+        
+        # Training precision
+        if args.precision == 'float32':
+            dtype = torch.float32
+        elif args.precision == 'float16' or args.precision == 'bfloat16':
+            raise Exception(f'Precision {args.precision} not implemented yet!')
+        else:
+            raise Exception(f'Unsupported training precision {args.precision}!')
+
+        net = PyGGCN(A, args.num_layers, args.embed, args.hidden,
+                     args.drop_rate,
+                     scale_input=not args.disable_scale_input,
+                     dtype=dtype).to(device)
+
+        if args.model_file is None:
+            
+            # Optimizer
+            optimizer = torch.optim.Adam(net.parameters(), lr=args.lr,
+                                         weight_decay=args.weight_decay)
+            scheduler = None
+            
+            # Train preconditioner
+            print('\nTraining PyGGNP ...')
+            M = PyGGNP(A, args.training_data, args.m, net, device)
+            tic = time.time()
+            hist_loss, best_loss, best_epoch, args.model_file = M.train(
+                args.batch_size, args.grad_accu_steps, args.epochs, optimizer,
+                scheduler, num_workers=args.num_workers,
+                checkpoint_prefix_with_path=\
+                out_file_prefix_with_path if args.save_model else None,
+                progress_bar=not args.hide_training_bar)
+            print(f'Done. Training time: {time.time()-tic} seconds')
+            print(f'Loss: inital = {hist_loss[0]}, '
+                  f'final = {hist_loss[-1]}, '
+                  f'best = {best_loss}, epoch = {best_epoch}')
+            if args.save_model:
+                print(f'Best model saved in {args.model_file}')
+
+            # Investigate training history of the preconditioner
+            print('\nPlotting training history ...')
+            plt.figure(1)
+            plt.semilogy(hist_loss, label='train')
+            plt.title(f'{args.problem}: Preconditioner convergence (MAE loss)')
+            plt.legend()
+            # plt.show()
+            full_path = out_file_prefix_with_path + 'training.png'
+            plt.savefig(full_path)
+            print(f'Figure saved in {full_path}')
+
+        if args.model_file:
+            
+            # Load model for the preconditioner (either the best
+            # trained model or the saved model)
+            print(f'\nLoading model from {args.model_file} ...')
+            net.load_state_dict(torch.load(args.model_file,
+                                           map_location=device))
+            M = PyGGNP(A, args.training_data, args.m, net, device)
+            print('Done.')
+            
+        else:
+            
+            # Use the model in the last training epoch
+            print('\nNo checkpoint is saved. Use model from the last epoch.')
+
+        # Solve
+        print('\nSolving linear system with PyGGNP ...')
+        warnings.filterwarnings('error')
+        try:
+            _, _, _, hist_rel_res_pyggnp, hist_time_pyggnp = solver.solve(
+                A, b, M=M, restart=args.restart, max_iters=args.max_iters,
+                timeout=args.timeout, rtol=args.rtol,
+                progress_bar=not args.hide_solver_bar)
+        except UserWarning as w:
+            print('Warning:', w)
+            print('GMRES preconditioned by PyGGNP fails')
+            hist_rel_res_pyggnp = None
+            hist_time_pyggnp = None
+        else:
+            print(f'Done. '
+                  f'Final relative residual = {hist_rel_res_pyggnp[-1]:.4e}')
+        warnings.resetwarnings()
+
     # Investigate solution history
     print('\nPlotting solution history ...')
     plt.figure(2)
@@ -524,7 +609,11 @@ def main():
                          color='C6', label='Block Jacobi')
         if 'gnp' in args.preconditioners and hist_rel_res_gnp is not None:
             plt.semilogy(hist_rel_res_gnp,
-                         color='C7', label='GNP')
+                         color='C7', label='GNP')    
+        if 'pyggnp' in args.preconditioners and hist_rel_res_pyggnp is not None:
+            plt.semilogy(hist_rel_res_pyggnp,
+                         color='C8', label='PYGGNP')
+            
     solver_name = solver.__class__.__name__
     plt.title(f'{args.problem}: {solver_name} convergence (relative residual)')
     plt.xlabel('(Outer) Iterations')
@@ -562,6 +651,10 @@ def main():
         if 'gnp' in args.preconditioners and hist_rel_res_gnp is not None:
             plt.semilogy(hist_time_gnp, hist_rel_res_gnp,
                          color='C7', label='GNP')
+        if 'pyggnp' in args.preconditioners and hist_rel_res_pyggnp is not None:
+            plt.semilogy(hist_time_pyggnp, hist_rel_res_pyggnp,
+                         color='C8', label='PYGGNP')
+            
     solver_name = solver.__class__.__name__
     plt.title(f'{args.problem}: {solver_name} convergence (relative residual)')
     plt.xlabel('Time (seconds)')

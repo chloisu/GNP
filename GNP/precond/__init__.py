@@ -5,3 +5,4 @@ from .GMRESPreconditioner import *
 from .GNP import *
 from .ILU import *
 from .Jacobi import *
+from .PyGGNP import PyGGNP

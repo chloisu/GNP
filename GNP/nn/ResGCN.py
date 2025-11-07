@@ -3,6 +3,8 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 
+from torch_geometric.nn.models import MLP as PyGMLP
+
 from GNP.utils import scale_A_by_spectral_radius
 
 
@@ -99,6 +101,61 @@ class ResGCN(nn.Module):
         self.mlp_initial = MLP(1, embed, 4, hidden, drop_rate)
         self.mlp_final = MLP(embed, 1, 4, hidden, drop_rate,
                              is_output_layer=True)
+        self.gconv = nn.ModuleList()
+        self.skip = nn.ModuleList()
+        self.batchnorm = nn.ModuleList()
+        for i in range(num_layers):
+            self.gconv.append( GCNConv(self.AA, embed, embed) )
+            self.skip.append( nn.Linear(embed, embed) )
+            self.batchnorm.append( nn.BatchNorm1d(embed) )
+        self.dropout = nn.Dropout(drop_rate)
+
+    def forward(self, r):                        # r: (n, batch_size)
+        assert len(r.shape) == 2
+        n, batch_size = r.shape
+        if self.scale_input:
+            scaling = torch.linalg.vector_norm(r, dim=0) / np.sqrt(n)
+            r = r / scaling  # scaling
+        r = r.view(n, batch_size, 1)                # (n, batch_size, 1)
+        R = self.mlp_initial(r)                     # (n, batch_size, embed)
+        
+        for i in range(self.num_layers):
+            R = self.gconv[i](R) + self.skip[i](R)  # (n, batch_size, embed)
+            R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
+            R = self.batchnorm[i](R)                # (n * batch_size, embed)
+            R = R.view(n, batch_size, self.embed)   # (n, batch_size, embed)
+            R = self.dropout(F.relu(R))             # (n, batch_size, embed)
+            
+        z = self.mlp_final(R)                       # (n, batch_size, 1)
+        z = z.view(n, batch_size)                   # (n, batch_size)
+        if self.scale_input:
+            z = z * scaling  # scaling back
+        return z
+
+
+class PyGGCN(nn.Module):
+    
+    def __init__(self, A, num_layers, embed, hidden, drop_rate,
+                 scale_input=True, dtype=torch.float32):
+        # A: float64, already on device.
+        #
+        # For graph convolution, A will be normalized and cast to
+        # lower precision and named AA.
+        
+        super().__init__()
+        self.dtype = dtype # used by GNP.precond.GNP
+        self.num_layers = num_layers
+        self.embed = embed
+        self.scale_input = scale_input
+
+        # Note: scale_A_by_spectral_radius() has been called when
+        # defining the problem; hence, it is redundant. We keep the
+        # code here to leave open the possibility of normalizing A in
+        # another manner.
+        self.AA = scale_A_by_spectral_radius(A).to(dtype)
+
+        self.mlp_initial = PyGMLP(in_channels=1, out_channels=embed, num_layers=4, hidden_channels=hidden, dropout = [drop_rate]*(4), norm =None)
+        self.mlp_final = PyGMLP(in_channels=embed, out_channels=1, num_layers=4, hidden_channels=hidden, dropout=[drop_rate]*(4-1)+[0],norm =None)
         self.gconv = nn.ModuleList()
         self.skip = nn.ModuleList()
         self.batchnorm = nn.ModuleList()
