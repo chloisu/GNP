@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 
 from torch_geometric.nn.models import MLP as PyGMLP
+from torch_geometric.contrib.nn import ResGConv as ResGConv
+from torch_geometric.utils import dense_to_sparse
 
 from GNP.utils import scale_A_by_spectral_radius
 
@@ -160,12 +162,12 @@ class PyGGCN(nn.Module):
         self.skip = nn.ModuleList()
         self.batchnorm = nn.ModuleList()
         for i in range(num_layers):
-            self.gconv.append( GCNConv(self.AA, embed, embed) )
-            self.skip.append( nn.Linear(embed, embed) )
-            self.batchnorm.append( nn.BatchNorm1d(embed) )
+            self.gconv.append(ResGConv(embed, embed))
+            self.batchnorm.append(nn.BatchNorm1d(embed))
         self.dropout = nn.Dropout(drop_rate)
 
-    def forward(self, r):                        # r: (n, batch_size)
+    def forward(self, r, adj):                        # r: (n, batch_size)
+        edge_index,edge_weight = dense_to_sparse(adj.to(self.dtype))
         assert len(r.shape) == 2
         n, batch_size = r.shape
         if self.scale_input:
@@ -173,9 +175,9 @@ class PyGGCN(nn.Module):
             r = r / scaling  # scaling
         r = r.view(n, batch_size, 1)                # (n, batch_size, 1)
         R = self.mlp_initial(r)                     # (n, batch_size, embed)
-        
         for i in range(self.num_layers):
-            R = self.gconv[i](R) + self.skip[i](R)  # (n, batch_size, embed)
+            R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
+            R = self.gconv[i](R,edge_index,edge_weight)            
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
             R = self.batchnorm[i](R)                # (n * batch_size, embed)
             R = R.view(n, batch_size, self.embed)   # (n, batch_size, embed)
