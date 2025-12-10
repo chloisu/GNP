@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 
 from GNP.solver import Arnoldi
-
+from GNP.utils import scale_A_by_spectral_radius
 
     
 #-----------------------------------------------------------------------------
@@ -166,6 +166,8 @@ class PyGGNP():
     
     def __init__(self, A, training_data, m, net, device):
         self.A = A
+        self.AA = scale_A_by_spectral_radius(A).to(net.dtype)
+
         self.training_data = training_data
         self.m = m
         self.net = net
@@ -200,7 +202,7 @@ class PyGGNP():
                 b = x_or_b[0].to(self.device).to(self.dtype)
 
             # Train
-            x_out = self.net(b,self.A)
+            x_out = self.net(b,self.AA)
             b_out = (self.A @ x_out.to(torch.float64)).to(self.dtype)
             loss = F.l1_loss(b_out, b)
 
@@ -242,7 +244,7 @@ class PyGGNP():
         self.net.eval()
         r = r.to(self.dtype) # -> lower precision
         r = r.view(-1, 1)
-        z = self.net(r,self.A)
+        z = self.net(r,self.AA)
         z = z.view(-1)
         z = z.double() # -> float64
         return z

@@ -208,12 +208,22 @@ def main():
         '--hide_training_bar', action='store_true',
         help='hide progress bar in neural net training')
     
+    # Random seed
+    parser.add_argument(
+        '--use_random_seed', action='store_true',
+        help='use a random seed for the random number generation.')
+    
+    parser.add_argument(
+        '--random_seed', type=int, default=1234,
+        help='value of the random seed. Only used if --use_random_seed is passed.')
+
     # Print input arguments
     args = parser.parse_args()
     print('Input options. '
           '"n" and "location" may be adjusted according to "problem"')
     print(json.dumps(vars(args), indent=2))
 
+ 
     # Computing device
     if torch.cuda.is_available():
         device = torch.device('cuda')
@@ -415,7 +425,11 @@ def main():
             
     # GMRES with GNP
     if args.preconditioners is not None and 'gnp' in args.preconditioners:
-        
+        # Random seed 
+        if args.use_random_seed is True:
+            torch.manual_seed(args.random_seed)
+            import random
+            random.seed(args.random_seed)
         # Training precision
         if args.precision == 'float32':
             dtype = torch.float32
@@ -500,7 +514,11 @@ def main():
 
     # GMRES with PyGGNP
     if args.preconditioners is not None and 'pyggnp' in args.preconditioners:
-        
+        # Random seed 
+        if args.use_random_seed is True:
+            torch.manual_seed(args.random_seed)
+            import random
+            random.seed(args.random_seed)
         # Training precision
         if args.precision == 'float32':
             dtype = torch.float32

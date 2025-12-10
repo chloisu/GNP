@@ -5,7 +5,7 @@ import numpy as np
 
 from torch_geometric.nn.models import MLP as PyGMLP
 from torch_geometric.contrib.nn import ResGConv as ResGConv
-from torch_geometric.utils import dense_to_sparse
+from torch_geometric.utils import is_torch_sparse_tensor,dense_to_sparse, to_edge_index
 
 from GNP.utils import scale_A_by_spectral_radius
 
@@ -156,18 +156,25 @@ class PyGGCN(nn.Module):
         # another manner.
         self.AA = scale_A_by_spectral_radius(A).to(dtype)
 
-        self.mlp_initial = PyGMLP(in_channels=1, out_channels=embed, num_layers=4, hidden_channels=hidden, dropout = [drop_rate]*(4), norm =None)
-        self.mlp_final = PyGMLP(in_channels=embed, out_channels=1, num_layers=4, hidden_channels=hidden, dropout=[drop_rate]*(4-1)+[0],norm =None)
+        #self.mlp_initial = PyGMLP(in_channels=1, out_channels=embed, num_layers=4, hidden_channels=hidden, dropout = [drop_rate]*(4), norm =None)
+        #self.mlp_final = PyGMLP(in_channels=embed, out_channels=1, num_layers=4, hidden_channels=hidden, dropout=[drop_rate]*(4-1)+[0],norm =None)
+        self.mlp_initial = MLP(1, embed, 4, hidden, drop_rate)
+        self.mlp_final = MLP(embed, 1, 4, hidden, drop_rate,
+                             is_output_layer=True)
         self.gconv = nn.ModuleList()
         self.skip = nn.ModuleList()
         self.batchnorm = nn.ModuleList()
         for i in range(num_layers):
-            self.gconv.append(ResGConv(embed, embed))
+            self.gconv.append(GCNConv(self.AA,embed,embed))
+            self.skip.append( nn.Linear(embed, embed) )
             self.batchnorm.append(nn.BatchNorm1d(embed))
         self.dropout = nn.Dropout(drop_rate)
 
     def forward(self, r, adj):                        # r: (n, batch_size)
-        edge_index,edge_weight = dense_to_sparse(adj.to(self.dtype))
+        if not is_torch_sparse_tensor(adj):
+            edge_index,edge_weight = dense_to_sparse(adj.to(self.dtype))
+        else:
+            edge_index,edge_weight = to_edge_index(adj.to(self.dtype))
         assert len(r.shape) == 2
         n, batch_size = r.shape
         if self.scale_input:
@@ -176,8 +183,8 @@ class PyGGCN(nn.Module):
         r = r.view(n, batch_size, 1)                # (n, batch_size, 1)
         R = self.mlp_initial(r)                     # (n, batch_size, embed)
         for i in range(self.num_layers):
-            R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
-            R = self.gconv[i](R,edge_index,edge_weight)            
+            #R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
+            R = self.gconv[i](R) + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
             R = self.batchnorm[i](R)                # (n * batch_size, embed)
             R = R.view(n, batch_size, self.embed)   # (n, batch_size, embed)
