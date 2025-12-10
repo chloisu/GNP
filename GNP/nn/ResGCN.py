@@ -165,26 +165,29 @@ class PyGGCN(nn.Module):
         self.skip = nn.ModuleList()
         self.batchnorm = nn.ModuleList()
         for i in range(num_layers):
-            self.gconv.append(GCNConv(self.AA,embed,embed))
-            self.skip.append( nn.Linear(embed, embed) )
+            self.gconv.append(ResGConv(embed))
             self.batchnorm.append(nn.BatchNorm1d(embed))
         self.dropout = nn.Dropout(drop_rate)
 
     def forward(self, r, adj):                        # r: (n, batch_size)
+        assert len(r.shape) == 2
+        n, batch_size = r.shape
+        assert batch_size == 1
+
         if not is_torch_sparse_tensor(adj):
             edge_index,edge_weight = dense_to_sparse(adj.to(self.dtype))
         else:
             edge_index,edge_weight = to_edge_index(adj.to(self.dtype))
-        assert len(r.shape) == 2
-        n, batch_size = r.shape
+            #print(edge_index,edge_weight)
+        
         if self.scale_input:
             scaling = torch.linalg.vector_norm(r, dim=0) / np.sqrt(n)
             r = r / scaling  # scaling
         r = r.view(n, batch_size, 1)                # (n, batch_size, 1)
         R = self.mlp_initial(r)                     # (n, batch_size, embed)
         for i in range(self.num_layers):
-            #R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
-            R = self.gconv[i](R) + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
+            R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
+            R = self.gconv[i](R,edge_index,edge_weight,self.AA)  # + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
             R = self.batchnorm[i](R)                # (n * batch_size, embed)
             R = R.view(n, batch_size, self.embed)   # (n, batch_size, embed)

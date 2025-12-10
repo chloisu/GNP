@@ -1,0 +1,36 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug all_in_one.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/examples/all_in_one.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--preconditioners",
+                "pyggnp",
+                "--problem",
+                "1d_laplacian",
+                "--use_random_seed"
+            ],
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}/examples",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        },
+        {
+            "name": "Debug test_debug.py",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_debug.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            }
+        }
+    ]
+}
