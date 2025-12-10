@@ -187,7 +187,7 @@ class PyGGCN(nn.Module):
         R = self.mlp_initial(r)                     # (n, batch_size, embed)
         for i in range(self.num_layers):
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
-            R = self.gconv[i](R,edge_index,edge_weight,self.AA)  # + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
+            R = self.gconv[i](R,edge_index,edge_weight)  # + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
             R = self.batchnorm[i](R)                # (n * batch_size, embed)
             R = R.view(n, batch_size, self.embed)   # (n, batch_size, embed)
