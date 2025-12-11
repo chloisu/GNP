@@ -163,133 +163,144 @@ class ResGCN(nn.Module):
 
 
 class PyGGCN(nn.Module):
-    
+    """
+    A PyTorch Geometric implementation of the GNP ResGCN architecture.
+
+    This module wraps the original ResGCN design so that graph convolution
+    is performed using PyG’s `ResGConv` operator, while preserving the
+    scale-equivariance behavior required by GNP.
+
+    Inputs
+    ------
+    A : torch.Tensor
+        Graph adjacency matrix (dense or sparse), already on device.
+    num_layers : int
+        Number of ResGConv layers.
+    embed : int
+        Node embedding dimension.
+    hidden : int
+        Hidden dimension for the MLPs.
+    drop_rate : float
+        Dropout probability.
+    scale_input : bool
+        Whether to apply global input/output normalization.
+    dtype : torch.dtype
+        Internal dtype used for computations.
+    """
+
     def __init__(self, A, num_layers, embed, hidden, drop_rate,
                  scale_input=True, dtype=torch.float32):
-        # A: float64, already on device.
-        #
-        # For graph convolution, A will be normalized and cast to
-        # lower precision and named AA.
-        
+
         super().__init__()
-        self.dtype = dtype # used by GNP.precond.GNP
+        self.dtype = dtype
         self.num_layers = num_layers
         self.embed = embed
         self.scale_input = scale_input
 
-        # Note: scale_A_by_spectral_radius() has been called when
-        # defining the problem; hence, it is redundant. We keep the
-        # code here to leave open the possibility of normalizing A in
-        # another manner.
+        # Normalize A by its spectral radius.
+        # Retain the call here for modularity.
         self.AA = scale_A_by_spectral_radius(A).to(dtype)
 
-                # --- Precompute adjacency in PyG format ---
+        # Convert adjacency to PyG’s (edge_index, edge_weight) format.
         if is_torch_sparse_tensor(self.AA):
-            # AA is a torch.sparse_* tensor
             edge_index, edge_weight = to_edge_index(self.AA)
         else:
-            # AA is dense
             edge_index, edge_weight = dense_to_sparse(self.AA)
 
-        # Cache as buffers so they move with .to(device)
+        # Register adjacency components as buffers so they migrate with `.to(device)`.
         self.register_buffer("edge_index", edge_index)
         self.register_buffer("edge_weight", edge_weight)
 
-        #self.mlp_initial = PyGMLP(in_channels=1, out_channels=embed, num_layers=4, hidden_channels=hidden, dropout = [drop_rate]*(4), norm =None)
-        #self.mlp_final = PyGMLP(in_channels=embed, out_channels=1, num_layers=4, hidden_channels=hidden, dropout=[drop_rate]*(4-1)+[0],norm =None)
-        # self.mlp_initial = MLP(1, embed, 4, hidden, drop_rate)
-        # self.mlp_final = MLP(embed, 1, 4, hidden, drop_rate,
-        #                      is_output_layer=True)
-        
-        # Input: [N_total, 1] -> [N_total, embed]
+        # Input MLP: maps scalar RHS entries → embedding dimension.
         self.mlp_initial = PyGMLP(
             in_channels=1,
-            hidden_channels=hidden,   
+            hidden_channels=hidden,
             out_channels=embed,
             num_layers=4,
-            dropout=drop_rate,        #per layer [drop_rate]*(4-1)+[0.0]
+            dropout=drop_rate,
             norm=None,
         )
 
-        # Output: [N_total, embed] -> [N_total, 1]
+        # Output MLP: maps embeddings → scalar prediction.
         self.mlp_final = PyGMLP(
             in_channels=embed,
             hidden_channels=hidden,
             out_channels=1,
             num_layers=4,
-            dropout=[drop_rate]*(4-1) + [0.0],
+            dropout=[drop_rate] * (4 - 1) + [0.0],  # No dropout in final layer.
             norm=None,
         )
-        
-        #GNN
+
+        # ResGConv layers with batch normalization.
         self.gconv = nn.ModuleList()
-        self.skip = nn.ModuleList()
         self.batchnorm = nn.ModuleList()
         for _ in range(num_layers):
             self.gconv.append(ResGConv(embed))
             self.batchnorm.append(nn.BatchNorm1d(embed))
+
         self.dropout = nn.Dropout(drop_rate)
 
-    def forward(self, r):  # r: (n, batch_size)
-        assert len(r.shape) == 2
+    def forward(self, r):
+        """
+        Parameters
+        ----------
+        r : torch.Tensor of shape (n, batch_size)
+            Right-hand-side vectors stacked column-wise.
+
+        Returns
+        -------
+        torch.Tensor of shape (n, batch_size)
+            Network predictions corresponding to each RHS.
+        """
+        assert r.dim() == 2
         n, batch_size = r.shape
 
-        # Optional global scaling
+        # Optional normalization for scale-equivariance.
         if self.scale_input:
-            # [batch_size]
             scaling = torch.linalg.vector_norm(r, dim=0) / np.sqrt(n)
-            # Broadcast to (n, batch_size)
             r = r / scaling
 
-        # Build a list of Data objects, one per RHS
-        data_list = []
-        # Pre-cached adjacency
-        edge_index = self.edge_index
-        edge_weight = self.edge_weight
-
-        # Ensure dtype/device
         r = r.to(self.dtype)
-        edge_index = edge_index.to(r.device)
-        edge_weight = edge_weight.to(r.device) if edge_weight is not None else None
+        edge_index = self.edge_index.to(r.device)
+        edge_weight = (
+            self.edge_weight.to(r.device)
+            if self.edge_weight is not None
+            else None
+        )
 
+        # Construct PyG Data objects, one per RHS.
+        data_list = []
         for i in range(batch_size):
-            x_i = r[:, i].view(-1, 1)  # [n, 1] node features
-            data_i = Data(
-                x=x_i,
-                edge_index=edge_index,
-                edge_attr=edge_weight,
-            )
-            data_list.append(data_i)
+            x_i = r[:, i].view(-1, 1)
+            data_list.append(Data(x=x_i, edge_index=edge_index, edge_attr=edge_weight))
 
-        # Create a batched graph
+        # Batch all graphs for vectorized processing.
         batch = Batch.from_data_list(data_list)
-        x = batch.x              # [n * batch_size, 1]
+        x = batch.x
         edge_index = batch.edge_index
         edge_weight = batch.edge_attr
 
-        # Apply input MLP: shape [N_total, embed]
-        x = self.mlp_initial(x)  # treat as generic MLP on node feats
+        # Input MLP.
+        x = self.mlp_initial(x)
 
-        # GNN layers
+        # GNN layers.
         for i in range(self.num_layers):
             x = self.gconv[i](x, edge_index, edge_weight)
             x = self.batchnorm[i](x)
             x = self.dropout(F.relu(x))
 
-        # Output MLP
-        x = self.mlp_final(x)    # [N_total, 1]
+        # Output MLP.
+        x = self.mlp_final(x)
 
-        # Now unbatch: x is [n * batch_size, 1], batch.batch tells us which nodes
-        # belong to which graph.
-        # A simple way since all graphs are same size:
-        x = x.view(batch_size, n, 1)        # [B, n, 1]
-        x = x.transpose(0, 1).squeeze(-1)   # [n, B]
+        # Unbatch into shape (n, batch_size).
+        x = x.view(batch_size, n, 1)
+        x = x.transpose(0, 1).squeeze(-1)
 
         if self.scale_input:
-            # scaling: [B], broadcast to [n, B]
             x = x * scaling
 
         return x
+
 
 
 def res_gconv_norm(  # noqa: F811
