@@ -27,6 +27,7 @@ import os
 import json
 import time
 import torch
+import random #new
 import inspect
 import argparse
 import warnings
@@ -37,13 +38,15 @@ import GNP.problems as syn_problems
 from GNP.problems import *
 from GNP.solver import GMRES
 from GNP.precond import *
-from GNP.nn import ResGCN
+from GNP.nn import ResGCN, ScaleEquivariantWrapper # new ScaleEquivariantWrapper
 from GNP.utils import scale_A_by_spectral_radius, load_suitesparse
 
 
 #-----------------------------------------------------------------------------
 def main():
-
+    # torch.manual_seed(100)
+    # np.random.seed(100)
+    # random.seed(100)
     # List of synthetic problems
     problems = [problem for problem in dir(syn_problems)
                 if inspect.isfunction(getattr(syn_problems, problem))]
@@ -424,10 +427,13 @@ def main():
         else:
             raise Exception(f'Unsupported training precision {args.precision}!')
 
-        net = ResGCN(A, args.num_layers, args.embed, args.hidden,
+        core = ResGCN(A, args.num_layers, args.embed, args.hidden,
                      args.drop_rate,
-                     scale_input=not args.disable_scale_input,
-                     dtype=dtype).to(device)
+                     scale_input=False,
+                     dtype=dtype).to(device) #not args.disable_scale_input
+        
+        net = ScaleEquivariantWrapper(core, norm="l2", eps=1e-8).to(device)
+        print("Dev GNP net type:", type(net))
 
         if args.model_file is None:
             

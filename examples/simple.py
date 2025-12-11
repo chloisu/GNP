@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 from GNP.problems import *
 from GNP.solver import GMRES
 from GNP.precond import *
-from GNP.nn import ResGCN
+from GNP.nn import ResGCN, ScaleEquivariantWrapper #new
 from GNP.utils import scale_A_by_spectral_radius, load_suitesparse
 
 
@@ -129,8 +129,10 @@ def main():
 
     # GMRES with GNP: Train preconditioner
     print('\nTraining GNP ...')
-    net = ResGCN(A, num_layers, embed, hidden, drop_rate,
-                 scale_input=not disable_scale_input, dtype=dtype).to(device)
+    core = ResGCN(A, num_layers, embed, hidden, drop_rate,
+                 scale_input=False, dtype=dtype).to(device) #not disable_scale_input
+    net  = ScaleEquivariantWrapper(core, norm="l2", eps=1e-8).to(device)
+    print("Dev GNP net type:", type(net))
     optimizer = torch.optim.Adam(net.parameters(), lr=lr,
                                  weight_decay=weight_decay)
     scheduler = None
