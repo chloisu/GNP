@@ -1,2 +1,2 @@
 from .ResGCN import *
-from .SEW import ScaleEquivariantWrapper
+from .SEW import *

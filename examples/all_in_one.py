@@ -38,7 +38,7 @@ import GNP.problems as syn_problems
 from GNP.problems import *
 from GNP.solver import GMRES
 from GNP.precond import *
-from GNP.nn import ResGCN, ScaleEquivariantWrapper # new ScaleEquivariantWrapper
+from GNP.nn import ResGCN, ScaleEquivariantWrapper, PyGGCN # new ScaleEquivariantWrapper, PyGGCN
 from GNP.utils import scale_A_by_spectral_radius, load_suitesparse
 
 
@@ -427,13 +427,14 @@ def main():
         else:
             raise Exception(f'Unsupported training precision {args.precision}!')
 
-        core = ResGCN(A, args.num_layers, args.embed, args.hidden,
-                     args.drop_rate,
-                     scale_input=False,
-                     dtype=dtype).to(device) #not args.disable_scale_input
+        core = PyGGCN(
+            A, args.num_layers, args.embed, args.hidden,
+            args.drop_rate, scale_input=False, dtype=dtype
+        ).to(device)
         
         net = ScaleEquivariantWrapper(core, norm="l2", eps=1e-8).to(device)
         print("Dev GNP net type:", type(net))
+        print("Dev GCN net type:", type(core))
 
         if args.model_file is None:
             
