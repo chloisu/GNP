@@ -5,9 +5,9 @@ import numpy as np
 
 from torch_geometric.nn.models import MLP as PyGMLP
 from torch_geometric.contrib.nn import ResGConv as ResGConv
-from torch_geometric.utils import is_torch_sparse_tensor,dense_to_sparse, to_edge_index
+from torch_geometric.utils import is_torch_sparse_tensor,dense_to_sparse, to_edge_index, to_torch_sparse_tensor
 
-from GNP.utils import scale_A_by_spectral_radius
+from GNP.utils import scale_A_by_spectral_radius 
 
 
 #-----------------------------------------------------------------------------
@@ -176,8 +176,12 @@ class PyGGCN(nn.Module):
 
         if not is_torch_sparse_tensor(adj):
             edge_index,edge_weight = dense_to_sparse(adj.to(self.dtype))
+            if self.training:
+                adj = to_torch_sparse_tensor(edge_index,edge_weight)
         else:
             edge_index,edge_weight = to_edge_index(adj.to(self.dtype))
+            if self.training:
+                adj = to_torch_sparse_tensor(edge_index,edge_weight)
             #print(edge_index,edge_weight)
         
         if self.scale_input:
@@ -187,7 +191,10 @@ class PyGGCN(nn.Module):
         R = self.mlp_initial(r)                     # (n, batch_size, embed)
         for i in range(self.num_layers):
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
-            R = self.gconv[i](R,edge_index,edge_weight)  # + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
+            if self.training:
+                R = self.gconv[i](R,adj.T)#edge_index,edge_weight)  # + self.skip[i](R)#,edge_index,edge_weight,self.AA)            
+            else:
+                R = self.gconv[i](R,edge_index,edge_weight)
             R = R.view(n * batch_size, self.embed)  # (n * batch_size, embed)
             R = self.batchnorm[i](R)                # (n * batch_size, embed)
             R = R.view(n, batch_size, self.embed)   # (n, batch_size, embed)
