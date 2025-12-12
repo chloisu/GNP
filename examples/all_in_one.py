@@ -247,7 +247,7 @@ def main():
         A = load_suitesparse(args.location, args.problem, device)
     #
     # Normalize A before everything, to avoid hassles
-    A = scale_A_by_spectral_radius(A)
+    #A = scale_A_by_spectral_radius(A)
     #
     n = A.shape[0]   # no guarantee that n == args.n
     print(f'\nMatrix A: name = {args.problem}, n = {n}, nnz = ' +

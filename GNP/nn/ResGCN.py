@@ -125,6 +125,7 @@ class ResGCN(nn.Module):
         # code here to leave open the possibility of normalizing A in
         # another manner.
         self.AA = scale_A_by_spectral_radius(A).to(dtype)
+        print(torch.linalg.norm(self.AA))
 
         self.mlp_initial = MLP(1, embed, 4, hidden, drop_rate)
         self.mlp_final = MLP(embed, 1, 4, hidden, drop_rate,
@@ -198,8 +199,8 @@ class PyGGCN(nn.Module):
 
         # Normalize A by its spectral radius.
         # Retain the call here for modularity.
-        self.AA = scale_A_by_spectral_radius(A).to(dtype)
-
+        self.AA = A.to(dtype)#scale_A_by_spectral_radius(A).to(dtype)
+        print(torch.linalg.norm(self.AA))
         # Convert adjacency to PyG’s (edge_index, edge_weight) format.
         if is_torch_sparse_tensor(self.AA):
             edge_index, edge_weight = to_edge_index(self.AA)
@@ -234,7 +235,7 @@ class PyGGCN(nn.Module):
         self.gconv = nn.ModuleList()
         self.batchnorm = nn.ModuleList()
         for _ in range(num_layers):
-            self.gconv.append(ResGConv(embed))
+            self.gconv.append(ResGConv(embed,normalize=True))
             self.batchnorm.append(nn.BatchNorm1d(embed))
 
         self.dropout = nn.Dropout(drop_rate)
