@@ -123,7 +123,10 @@ class ResGCN(nn.Module):
         # Note: scale_A_by_spectral_radius() has been called when
         # defining the problem; hence, it is redundant. We keep the
         # code here to leave open the possibility of normalizing A in
-        # another manner.
+        # another manner. 
+        # with the current setup, where the matrix is not normalized
+        # at the beginning to test the normalize=True option in 
+        # ResGConv of PyGGCN below, this is actually not redundant.
         self.AA = scale_A_by_spectral_radius(A).to(dtype)
 
         self.mlp_initial = MLP(1, embed, 4, hidden, drop_rate)
@@ -198,6 +201,8 @@ class PyGGCN(nn.Module):
 
         # Normalize A by its spectral radius.
         # Retain the call here for modularity.
+        # skip normalization step here, to check usage of 
+        # normalize=True in ResGConv 
         self.AA = A.to(dtype)#scale_A_by_spectral_radius(A).to(dtype)
         # Convert adjacency to PyG’s (edge_index, edge_weight) format.
         if is_torch_sparse_tensor(self.AA):
