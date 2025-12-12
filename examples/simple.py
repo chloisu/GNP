@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 from GNP.problems import *
 from GNP.solver import GMRES
 from GNP.precond import *
-from GNP.nn import ResGCN
+from GNP.nn import ResGCN, ScaleEquivariantWrapper, PyGGCN #new
 from GNP.utils import scale_A_by_spectral_radius, load_suitesparse
 
 from GNP.nn import PyGGCN
@@ -63,7 +63,24 @@ def main():
     parser.add_argument(
         '--num_workers', type=int, default=0,
         help='number of dataloader workers in training GNP (default: 0)')
+    parser.add_argument(
+    "--num-layers", type=int, default=8,
+    help="Number of ResGConv layers in PyGGCN.",
+    )
+    parser.add_argument(
+        "--embed", type=int, default=16,
+        help="Embedding dimension for node features.",
+    )
+    parser.add_argument(
+        "--hidden", type=int, default=32,
+        help="Hidden dimension of MLPs.",
+    )
+    parser.add_argument(
+        "--drop-rate", type=float, default=0.0,
+        help="Dropout probability in MLP and GNN layers.",
+    )
     args = parser.parse_args()
+    
 
     # Setup and parameters
     restart = 10                # restart cycle in GMRES
@@ -131,8 +148,14 @@ def main():
 
     # GMRES with GNP: Train preconditioner
     print('\nTraining GNP ...')
-    net = PyGGCN(A, num_layers, embed, hidden, drop_rate,
-                 scale_input=not disable_scale_input, dtype=dtype).to(device)
+    core = PyGGCN(
+        A, args.num_layers, args.embed, args.hidden,
+        args.drop_rate, scale_input=False, dtype=dtype
+    ).to(device)
+    
+    net = ScaleEquivariantWrapper(core, norm="l2", eps=1e-8).to(device)
+    print("Dev GNP net type:", type(net))
+    print("Dev GCN net type:", type(core))
     optimizer = torch.optim.Adam(net.parameters(), lr=lr,
                                  weight_decay=weight_decay)
     scheduler = None
