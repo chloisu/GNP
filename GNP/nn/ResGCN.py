@@ -6,12 +6,11 @@ from GNP.utils import scale_A_by_spectral_radius
 from torch_geometric.nn.models import MLP as PyGMLP
 from torch_geometric.utils import is_torch_sparse_tensor,dense_to_sparse, to_edge_index, to_torch_sparse_tensor
 from torch_geometric.data import Data, Batch
-#from torch_geometric.contrib.nn import ResGConv as ResGConv
+from torch_geometric.contrib.nn import ResGConv as ResGConv
 # if published, import from package, else use below
 
 
-
-
+"""
 # ResGConv imports
 from typing import Optional
 from torch import Tensor
@@ -35,7 +34,7 @@ from torch_geometric.utils import (
 )
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 from torch_geometric.utils.sparse import set_sparse_value
-
+"""
 
 #-----------------------------------------------------------------------------
 # An MLP layer.
@@ -302,7 +301,7 @@ class PyGGCN(nn.Module):
         return x
 
 
-
+"""
 def res_gconv_norm(  # noqa: F811
     edge_index: Adj,
     edge_weight: OptTensor = None,
@@ -385,125 +384,127 @@ def res_gconv_norm(  # noqa: F811
     edge_weight = edge_weight / gamma
 
     return edge_index, edge_weight
+"""
 
-
-class ResGConv(MessagePassing):
-    r"""The graph convolutional operator with residual skip connections from
-    the `"Graph Neural Preconditioners for Iterative Solutions of Sparse
-    Linear Systems" <https://arxiv.org/pdf/2406.00809>`_ paper.
-
-    .. math::
-        \text{Res-GCONV}(\mathbf{X}) = \text{ReLU}\left(\mathbf{XU} +
-        \mathbf{\hat{A}XW}\right)
-
-    where
-    :math:`\mathbf{\hat{A}}\in \mathbb{R}^{n\times n}` denotes the weighted
-    adjacency matrix
-    normalized using the normalization
-    :math:`\mathbf{\hat{A}} = \mathbf{A}/\gamma`, where :math:`\gamma =
-    \min\{\max_j\{\sum_j
-    |a|_{ij}\},\max_i\{\sum_i |a|_{ij}\}\}`
-    and :math:`\mathbf{W,U}` are matrices containing the learnable parameters.
-
-    Args:
-        channels (int): Size of each input and output sample.
-            bias_u (bool, optional): If set to :obj:`False`, the layer will not
-            learn an additive bias together with :math:`\mathbf{U}`.
-            (default: obj:`True`)
-        bias_u (bool, optional): If set to :obj:`False`, the layer will not
-            learn an additive bias together with :math:`\mathbf{U}`.
-            (default: obj:`True`)
-        add_self_loops (bool, optional): If set to :obj:`True`, will add
-            self-loops to the input graph. (default: :obj:`False`)
-        cached (bool, optional): If set to :obj:`True`, the layer will cache
-            the computation of :math:`\mathbf{\hat{A}} = \mathbf{A}/\gamma` on
-            first execution, and will use the cached version for further
-            executions. This parameter should only be set to :obj:`True` in
-            transductive learning scenarios. (default: :obj:`False`)
-        normalize (bool, optional): Whether to apply normalization
-            by :math:`\gamma`. (default: :obj:`True`)
-        **kwargs (optional): Additional arguments of
-            :class:`torch_geometric.nn.conv.MessagePassing`.
-
-    Shapes:
-        - **input:**
-          node features :math:`(|\mathcal{V}|, F)`,
-          edge indices :math:`(2, |\mathcal{E}|)`,
-          edge weights :math:`(|\mathcal{E}|)` *(optional)*
-        - **output:** node features :math:`(|\mathcal{V}|, F)`
-    """
-
-    _cached_edge_index: Optional[OptPairTensor]
-    _cached_adj_t: Optional[SparseTensor]
-
-    def __init__(self, channels: int, bias_u: bool = True, bias_w: bool = True,
-                 add_self_loops: bool = False, cached: bool = False,
-                 normalize: bool = True, **kwargs):
-
-        kwargs.setdefault('aggr', 'add')
-        super().__init__(**kwargs)
-
-        self.channels = channels
-        self.cached = cached
-        self.normalize = normalize
-        self.add_self_loops = add_self_loops
-        self.bias_u = bias_u
-        self.bias_w = bias_w
-
-        self._cached_edge_index = None
-        self._cached_adj_t = None
-
-        self.U = Linear(self.channels, self.channels, bias=self.bias_u)
-        self.W = Linear(self.channels, self.channels, bias=self.bias_w)
-
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        super().reset_parameters()
-        self.U.reset_parameters()
-        self.W.reset_parameters()
-        self._cached_edge_index = None
-        self._cached_adj_t = None
-
-    def forward(self, x: Tensor, edge_index: Adj,
-                edge_weight: OptTensor = None) -> Tensor:
-
-        if self.normalize:
-            if isinstance(edge_index, Tensor):
-                cache = self._cached_edge_index
-                if cache is None:
-                    edge_index, edge_weight = res_gconv_norm(  # yapf: disable
-                        edge_index, edge_weight, x.size(self.node_dim), False,
-                        self.add_self_loops, self.flow, dtype=x.dtype)
-                    if self.cached:
-                        self._cached_edge_index = (edge_index, edge_weight)
-                else:
-                    edge_index, edge_weight = cache[0], cache[1]
-
-            elif isinstance(edge_index, SparseTensor):
-                cache = self._cached_adj_t
-                if cache is None:
-                    edge_index = res_gconv_norm(  # yapf: disable
-                        edge_index, edge_weight, x.size(self.node_dim), False,
-                        self.add_self_loops, self.flow, dtype=x.dtype)
-                    if self.cached:
-                        self._cached_adj_t = edge_index
-                else:
-                    edge_index = cache
-
-        wx = self.W(x)
-        awx = self.propagate(edge_index, x=wx, edge_weight=edge_weight)
-        out = awx
-        out = out + self.U(x)
-
-        return out
-
-    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
-        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
-
-    def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor:
-        return spmm(adj_t, x, reduce=self.aggr)
-
-    def __repr__(self) -> str:
-        return (f'{self.__class__.__name__}({self.channels}, '
-                f'bias_u={self.bias_u}, bias_w={self.bias_w})')
+#
+#class ResGConv(MessagePassing):
+#    r"""The graph convolutional operator with residual skip connections from
+#    the `"Graph Neural Preconditioners for Iterative Solutions of Sparse
+#    Linear Systems" <https://arxiv.org/pdf/2406.00809>`_ paper.
+#
+#    .. math::
+#        \text{Res-GCONV}(\mathbf{X}) = \text{ReLU}\left(\mathbf{XU} +
+#        \mathbf{\hat{A}XW}\right)
+#
+#    where
+#    :math:`\mathbf{\hat{A}}\in \mathbb{R}^{n\times n}` denotes the weighted
+#    adjacency matrix
+#    normalized using the normalization
+#    :math:`\mathbf{\hat{A}} = \mathbf{A}/\gamma`, where :math:`\gamma =
+#    \min\{\max_j\{\sum_j
+#    |a|_{ij}\},\max_i\{\sum_i |a|_{ij}\}\}`
+#    and :math:`\mathbf{W,U}` are matrices containing the learnable parameters.
+#
+#    Args:
+#        channels (int): Size of each input and output sample.
+#            bias_u (bool, optional): If set to :obj:`False`, the layer will not
+#            learn an additive bias together with :math:`\mathbf{U}`.
+#            (default: obj:`True`)
+#        bias_u (bool, optional): If set to :obj:`False`, the layer will not
+#            learn an additive bias together with :math:`\mathbf{U}`.
+#            (default: obj:`True`)
+#        add_self_loops (bool, optional): If set to :obj:`True`, will add
+#            self-loops to the input graph. (default: :obj:`False`)
+#        cached (bool, optional): If set to :obj:`True`, the layer will cache
+#            the computation of :math:`\mathbf{\hat{A}} = \mathbf{A}/\gamma` on
+#            first execution, and will use the cached version for further
+#            executions. This parameter should only be set to :obj:`True` in
+#            transductive learning scenarios. (default: :obj:`False`)
+#        normalize (bool, optional): Whether to apply normalization
+#            by :math:`\gamma`. (default: :obj:`True`)
+#        **kwargs (optional): Additional arguments of
+#            :class:`torch_geometric.nn.conv.MessagePassing`.
+#
+#    Shapes:
+#        - **input:**
+#          node features :math:`(|\mathcal{V}|, F)`,
+#          edge indices :math:`(2, |\mathcal{E}|)`,
+#          edge weights :math:`(|\mathcal{E}|)` *(optional)*
+#        - **output:** node features :math:`(|\mathcal{V}|, F)`
+#    """
+#
+#    _cached_edge_index: Optional[OptPairTensor]
+#    _cached_adj_t: Optional[SparseTensor]
+#
+#    def __init__(self, channels: int, bias_u: bool = True, bias_w: bool = True,
+#                 add_self_loops: bool = False, cached: bool = False,
+#                 normalize: bool = True, **kwargs):
+#
+#        kwargs.setdefault('aggr', 'add')
+#        super().__init__(**kwargs)
+#
+#        self.channels = channels
+#        self.cached = cached
+#        self.normalize = normalize
+#        self.add_self_loops = add_self_loops
+#        self.bias_u = bias_u
+#        self.bias_w = bias_w
+#
+#        self._cached_edge_index = None
+#        self._cached_adj_t = None
+#
+#        self.U = Linear(self.channels, self.channels, bias=self.bias_u)
+#        self.W = Linear(self.channels, self.channels, bias=self.bias_w)
+#
+#        self.reset_parameters()
+#
+#    def reset_parameters(self):
+#        super().reset_parameters()
+#        self.U.reset_parameters()
+#        self.W.reset_parameters()
+#        self._cached_edge_index = None
+#        self._cached_adj_t = None
+#
+#    def forward(self, x: Tensor, edge_index: Adj,
+#                edge_weight: OptTensor = None) -> Tensor:
+#
+#        if self.normalize:
+#            if isinstance(edge_index, Tensor):
+#                cache = self._cached_edge_index
+#                if cache is None:
+#                    edge_index, edge_weight = res_gconv_norm(  # yapf: disable
+#                        edge_index, edge_weight, x.size(self.node_dim), False,
+#                        self.add_self_loops, self.flow, dtype=x.dtype)
+#                    if self.cached:
+#                        self._cached_edge_index = (edge_index, edge_weight)
+#                else:
+#                    edge_index, edge_weight = cache[0], cache[1]
+#
+#            elif isinstance(edge_index, SparseTensor):
+#                cache = self._cached_adj_t
+#                if cache is None:
+#                    edge_index = res_gconv_norm(  # yapf: disable
+#                        edge_index, edge_weight, x.size(self.node_dim), False,
+#                        self.add_self_loops, self.flow, dtype=x.dtype)
+#                    if self.cached:
+#                        self._cached_adj_t = edge_index
+#                else:
+#                    edge_index = cache
+#
+#        wx = self.W(x)
+#        awx = self.propagate(edge_index, x=wx, edge_weight=edge_weight)
+#        out = awx
+#        out = out + self.U(x)
+#
+#        return out
+#
+#    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
+#        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
+#
+#    def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor:
+#        return spmm(adj_t, x, reduce=self.aggr)
+#
+#    def __repr__(self) -> str:
+#        return (f'{self.__class__.__name__}({self.channels}, '
+#                f'bias_u={self.bias_u}, bias_w={self.bias_w})')
+#

@@ -428,11 +428,7 @@ def main():
             
     # GMRES with GNP
     if args.preconditioners is not None and 'gnp' in args.preconditioners:
-        # Random seed 
-        if args.use_random_seed is True:
-            torch.manual_seed(args.random_seed)
-            import random
-            random.seed(args.random_seed)
+        
         # Training precision
         if args.precision == 'float32':
             dtype = torch.float32
@@ -441,14 +437,10 @@ def main():
         else:
             raise Exception(f'Unsupported training precision {args.precision}!')
 
-        core = PyGGCN(
-            A, args.num_layers, args.embed, args.hidden,
-            args.drop_rate, scale_input=False, dtype=dtype
-        ).to(device)
-        
-        net = ScaleEquivariantWrapper(core, norm="l2", eps=1e-8).to(device)
-        print("Dev GNP net type:", type(net))
-        print("Dev GCN net type:", type(core))
+        net = ResGCN(A, args.num_layers, args.embed, args.hidden,
+                     args.drop_rate,
+                     scale_input=not args.disable_scale_input,
+                     dtype=dtype).to(device)
 
         if args.model_file is None:
             
