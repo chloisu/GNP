@@ -534,10 +534,14 @@ def main():
         else:
             raise Exception(f'Unsupported training precision {args.precision}!')
 
-        net = PyGGCN(A, args.num_layers, args.embed, args.hidden,
-                     args.drop_rate,
-                     scale_input=not args.disable_scale_input,
-                     dtype=dtype).to(device)
+        core = PyGGCN(
+            A, args.num_layers, args.embed, args.hidden,
+                args.drop_rate, scale_input=False, dtype=dtype
+            ).to(device)
+            
+        net = ScaleEquivariantWrapper(core, norm="l2", eps=1e-8).to(device)
+        print("Dev GNP net type:", type(net))
+        print("Dev GCN net type:", type(core))
 
         if args.model_file is None:
             
@@ -548,7 +552,7 @@ def main():
             
             # Train preconditioner
             print('\nTraining PyGGNP ...')
-            M = PyGGNP(A, args.training_data, args.m, net, device)
+            M = GNP(A, args.training_data, args.m, net, device)
             tic = time.time()
             hist_loss, best_loss, best_epoch, args.model_file = M.train(
                 args.batch_size, args.grad_accu_steps, args.epochs, optimizer,
